@@ -1,6 +1,6 @@
 #!/bin/python3
 
-from scapy.all import IP, TCP, ICMP, sr1
+from scapy.all import IP, IPv6, ICMPv6EchoRequest, TCP, ICMP, sr1
 import ipaddress
 import sys
 import socket
@@ -15,16 +15,23 @@ TTL_OS = {
 
 def scan_network(ip, start_port, end_port):
     print(f"Starting scan of network {ip}")
-    print("="*70)
+    print("="*130)
 
     try:
         network = ipaddress.ip_network(ip)
         for host in network.hosts():
             host = str(host)
-            response = sr1(IP(dst=host) / ICMP(type = 8), timeout=1, verbose=0) # ICMP Echo Request
+            
+            if network.version == 4:
+                response = sr1(IP(dst=host) / ICMP(type=8), timeout=1, verbose=0)  # ICMP Echo Request
+                if response is not None and response.haslayer(ICMP) and response.getlayer(ICMP).type == 0:  # ICMP Echo Reply
+                    scan_host(host, start_port, end_port)
+            
+            elif network.version == 6:
+                response = sr1(IPv6(dst=host) / ICMPv6EchoRequest(), timeout=1, verbose=0)  # ICMPv6 Echo Request
+                if response is not None and response.haslayer(ICMPv6EchoReply):  # ICMPv6 Echo Reply
+                    scan_host(host, start_port, end_port)
 
-            if response is not None and response.haslayer(ICMP) and response.getlayer(ICMP).type == 0: #ICMP Echo Reply
-                scan_host(host, start_port, end_port)
     except ValueError:
         print("Invalid network address")
     except KeyboardInterrupt:
@@ -36,12 +43,18 @@ def scan_network(ip, start_port, end_port):
 
 def scan_host(ip, start_port, end_port):
     print(f"Starting port scan of ip {ip} from ports {start_port} to {end_port}")
-    print("="*70)
+    print("="*130)
 
     try:
+        is_ipv6 = ":" in ip
+
         for port in range(start_port, end_port+1):
             str_output = ''
-            syn_packet = IP(dst = ip) / TCP(dport = port, flags = 'S')
+            if is_ipv6:
+                syn_packet = IPv6(dst=ip) / TCP(dport=port, flags='S')
+            else:
+                syn_packet = IP(dst=ip) / TCP(dport=port, flags='S')
+
             response = sr1(syn_packet, timeout = 1, verbose = 0)
 
             if response is None:
@@ -59,8 +72,12 @@ def scan_host(ip, start_port, end_port):
             else:
 
                 if response.haslayer(TCP):
-                    str_output += f"OS: {TTL_OS[response.ttl]} | "
-                    str_output += f"Port: {port}/tcp "
+                    if is_ipv6:
+                        str_output += f"Port: {port}/tcp | "
+                    else:
+                        str_output += f"OS: {TTL_OS[response.ttl]} "
+                        str_output += f"| Port: {port}/tcp "
+                    
                     try:
                         str_output += f"| Service: {socket.getservbyport(port, 'tcp')} "
                     except:
@@ -84,9 +101,26 @@ def scan_host(ip, start_port, end_port):
         print(e)
 
 if __name__ == "__main__":
-    if '/' in sys.argv[1]:
-        scan_network(ip = str(sys.argv[1]), start_port = int(sys.argv[2]), end_port = int(sys.argv[3]))
-    elif len(sys.argv) == 4:
-        scan_host(ip = socket.gethostbyname(sys.argv[1]), start_port = int(sys.argv[2]), end_port = int(sys.argv[3]))
-    else:
-        raise SyntaxException("Invalid syntax. The right one is: python3 port-scanner.py <ip> <start_port> <end_port>")
+    scan_type = int(input("What is the scan type? [0 - Host | 1 - Network] "))
+    ip_version = int(input("Which is the version of protocol to be scanned? [4 | 6]? "))
+
+    if ip_version == 6:
+        ipv6 = str(input("Insert the IPv6 {type} adress: ".format(type="host" if scan_type == 0 else "network")))
+        start_port = int(input("Which port the scanner might start at? "))
+        end_port = int(input("Which port the scanner might end at? "))
+
+        if scan_type == 0:
+            scan_host(ip = socket.getaddrinfo(ipv6, None, socket.AF_INET6)[0][4][0], 
+                      start_port = start_port, end_port = end_port)
+        elif scan_type == 1:
+            scan_network(ip = ipv6, start_port = start_port, end_port = end_port)
+    
+    elif ip_version == 4:
+        ipv4 = input("Insert the IPv4 {type} adress: ".format(type="host" if scan_type == 0 else "network"))
+        start_port = int(input("Which port the scanner might start at? "))
+        end_port = int(input("Which port the scanner might end at? "))
+
+        if scan_type == 0:
+            scan_host(ip = socket.gethostbyname(ipv4), start_port = start_port, end_port = end_port)
+        elif scan_type == 1:
+            scan_network(ip = ipv4, start_port = start_port, end_port = end_port)
