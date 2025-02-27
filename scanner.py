@@ -1,6 +1,7 @@
 #!/bin/python3
 
-from scapy.all import IP, TCP, sr1
+from scapy.all import IP, TCP, ICMP, sr1
+import ipaddress
 import sys
 import socket
 import time
@@ -12,7 +13,28 @@ TTL_OS = {
     255:"Solaris"
 }
 
-def scan_ports(ip, start_port, end_port):
+def scan_network(ip, start_port, end_port):
+    print(f"Starting scan of network {ip}")
+    print("="*70)
+
+    try:
+        network = ipaddress.ip_network(ip)
+        for host in network.hosts():
+            host = str(host)
+            response = sr1(IP(dst=host) / ICMP(type = 8), timeout=1, verbose=0) # ICMP Echo Request
+
+            if response is not None and response.haslayer(ICMP) and response.getlayer(ICMP).type == 0: #ICMP Echo Reply
+                scan_host(host, start_port, end_port)
+    except ValueError:
+        print("Invalid network address")
+    except KeyboardInterrupt:
+        print("Exiting the port scan")
+        sys.exit()
+    except Exception as e:
+        print(e)
+
+
+def scan_host(ip, start_port, end_port):
     print(f"Starting port scan of ip {ip} from ports {start_port} to {end_port}")
     print("="*70)
 
@@ -62,7 +84,9 @@ def scan_ports(ip, start_port, end_port):
         print(e)
 
 if __name__ == "__main__":
-    if len(sys.argv) == 4:
-        scan_ports(ip = socket.gethostbyname(sys.argv[1]), start_port = int(sys.argv[2]), end_port = int(sys.argv[3]))
+    if '/' in sys.argv[1]:
+        scan_network(ip = str(sys.argv[1]), start_port = int(sys.argv[2]), end_port = int(sys.argv[3]))
+    elif len(sys.argv) == 4:
+        scan_host(ip = socket.gethostbyname(sys.argv[1]), start_port = int(sys.argv[2]), end_port = int(sys.argv[3]))
     else:
         raise SyntaxException("Invalid syntax. The right one is: python3 port-scanner.py <ip> <start_port> <end_port>")
