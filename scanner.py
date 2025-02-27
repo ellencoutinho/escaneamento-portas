@@ -1,6 +1,6 @@
 #!/bin/python3
 
-from scapy.all import IP, IPv6, ICMPv6EchoRequest, TCP, ICMP, sr1
+from scapy.all import IP, IPv6, ICMPv6EchoRequest, TCP, ICMP, sr1, UDP
 import ipaddress
 import sys
 import socket
@@ -49,50 +49,88 @@ def scan_host(ip, start_port, end_port):
         is_ipv6 = ":" in ip
 
         for port in range(start_port, end_port+1):
+            TCP_done = False
+            UDP_done = False
+
             str_output = ''
             if is_ipv6:
                 syn_packet = IPv6(dst=ip) / TCP(dport=port, flags='S')
             else:
                 syn_packet = IP(dst=ip) / TCP(dport=port, flags='S')
+            udp_packet = IP(dst=ip)/UDP(dport=port)
 
-            response = sr1(syn_packet, timeout = 1, verbose = 0)
+            response_udp = sr1(udp_packet, timeout=1, verbose=0)
+            response_tcp = sr1(syn_packet, timeout = 1, verbose = 0)
 
-            if response is None:
-                try:
-                    str_output += "OS: unknown "
-                    str_output += f"| Port: {port} "
-                    str_output += f"| Service: {socket.getservbyport(port, 'tcp')} "
-                    str_output +=  "| State: Filtered "
-                except:
-                    str_output += "OS: unknown "
-                    str_output += f"| Port: {port} "
-                    str_output += f"| Service: unknown "
-                    str_output +=  "| State: Filtered "
-
-            else:
-
-                if response.haslayer(TCP):
-                    if is_ipv6:
-                        str_output += f"Port: {port}/tcp | "
-                    else:
-                        str_output += f"OS: {TTL_OS[response.ttl]} "
-                        str_output += f"| Port: {port}/tcp "
-                    
+            if not TCP_done:
+                if response_tcp is None:
                     try:
+                        str_output += "OS: unknown "
+                        str_output += f"| Port: {port} "
                         str_output += f"| Service: {socket.getservbyport(port, 'tcp')} "
+                        str_output +=  "| State: Filtered "
+                    except:
+                        str_output += "OS: unknown "
+                        str_output += f"| Port: {port} "
+                        str_output += f"| Service: unknown "
+                        str_output +=  "| State: Filtered "
+
+                else:
+
+                    if response_tcp.haslayer(TCP):
+                        if is_ipv6:
+                            str_output += f"Port: {port}/tcp | "
+                        else:
+                            str_output += f"OS: {TTL_OS[response_tcp.ttl]} "
+                            str_output += f"| Port: {port}/tcp "
+                        
+                        try:
+                            str_output += f"| Service: {socket.getservbyport(port, 'tcp')} "
+                        except:
+                            str_output += f"| Service: unknown "
+                        
+                        if response_tcp.getlayer(TCP).flags == 0x14: #RST/ACK flag
+                            str_output += f"| State: Closed "
+                        
+                        elif response_tcp.getlayer(TCP).flags == 0x12: #SYN/ACK flag
+                            str_output += f"| State: Open "
+                        
+                        else:
+                            str_output += f"| State: Filtered "
+                    
+                print(str_output)
+                TCP_done = True
+                str_output = ''
+            
+            if not UDP_done:
+                if response_udp is None:
+                    str_output += "OS: unknown "
+                    str_output += f"| Port: {port}/udp "
+                    try:
+                        str_output += f"| Service: {socket.getservbyport(port, 'udp')} "
+                    except:
+                        str_output += f"| Service: unknown "
+                    str_output +=  "| State: Open|Filtered "
+
+                else:
+                    try:
+                        str_output += f"OS: {TTL_OS[response_udp.ttl]} "
+                    except:
+                        str_output += "OS: unknown "
+                    
+                    str_output += f"| Port: {port}/udp "
+
+                    try:
+                        str_output += f"| Service: {socket.getservbyport(port, 'udp')} "
                     except:
                         str_output += f"| Service: unknown "
                     
-                    if response.getlayer(TCP).flags == 0x14: #RST/ACK flag
-                        str_output += f"| State: Closed "
+                    str_output +=  "| State: Closed "
                     
-                    elif response.getlayer(TCP).flags == 0x12: #SYN/ACK flag
-                        str_output += f"| State: Open "
-                    
-                    else:
-                        str_output += f"| State: Filtered "
-                
-            print(str_output) 
+                print(str_output)
+                UDP_done = True
+                str_output = ''
+
 
     except KeyboardInterrupt:
         print("Exiting the port scan")
